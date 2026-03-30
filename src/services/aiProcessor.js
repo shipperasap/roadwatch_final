@@ -3,12 +3,8 @@
    Pure REST API (no SDK, maximum reliability)
    ────────────────────────────────────────────── */
 
-import { supabase } from '../lib/supabase';
-
-const GEMINI_KEY = import.meta.env.VITE_GEMINI_API_KEY;
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`;
-const SE_USER = import.meta.env.VITE_SE_USER;
-const SE_SECRET = import.meta.env.VITE_SE_SECRET;
+import { getAll, setAll } from '../lib/store';
+import { getGeminiKey, getSEUser, getSESecret } from '../lib/config';
 
 // ─────────────────────────────────────────────
 // Base64 (chunk safe)
@@ -63,21 +59,25 @@ async function loadImage(url) {
 // Raw Gemini REST call
 // ─────────────────────────────────────────────
 async function geminiREST(parts, wantJson = false) {
+    const key = getGeminiKey();
+    if (!key) throw new Error('Gemini API key not configured. Go to Settings to add your key.');
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`;
+
     const body = {
         contents: [{ role: 'user', parts }],
         safetySettings: [
-            { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-            { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+            { category: "HARM_CATEGORY_HARASSMENT",        threshold: "BLOCK_NONE" },
+            { category: "HARM_CATEGORY_HATE_SPEECH",       threshold: "BLOCK_NONE" },
             { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
             { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
         ],
         generationConfig: {
             temperature: 0.1,
-            maxOutputTokens: 800, // Always give enough room for the output
+            maxOutputTokens: 800,
             ...(wantJson ? { responseMimeType: 'application/json' } : {})
         }
     };
-    const r = await fetch(GEMINI_URL, {
+    const r = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
@@ -110,12 +110,10 @@ Respond with ONLY a JSON object:
     ];
 
     try {
-        const text = await geminiREST(parts, true); // true = force application/json
+        const text = await geminiREST(parts, true);
         console.log('[PLATE] Raw JSON:', text);
         const parsed = JSON.parse(text);
-
         if (!parsed.detected_plate) return null;
-
         const raw = parsed.detected_plate.toString().toUpperCase().replace(/[^A-Z0-9]/g, '');
         if (raw.length < 4 || raw === 'NONE' || raw === 'NULL') return null;
         return raw;
@@ -147,22 +145,15 @@ Respond with ONLY a JSON object (no markdown):
         : [{ text: prompt }];
 
     try {
-        const text = await geminiREST(parts, true);  // responseMimeType=application/json
+        const text = await geminiREST(parts, true);
         console.log('[ANALYSIS] Raw:', text.slice(0, 300));
         return JSON.parse(text);
     } catch (e) {
-        // Instead of swallowing the error, throw it so it gets displayed
         const text2 = await geminiREST(parts, false);
-
-        // Try strict extraction first
         let m = text2.match(/\{[\s\S]*\}/);
-
-        // If no closing bracket is found, it might have been cut off or flagged midway
         if (!m) {
-            // Find the start of the object
             const start = text2.indexOf('{');
             if (start !== -1) {
-                // Try to forcefully close the JSON to salvage something
                 let salvaged = text2.slice(start).trim();
                 if (!salvaged.endsWith('}')) {
                     if (!salvaged.endsWith('"')) salvaged += '"';
@@ -171,30 +162,24 @@ Respond with ONLY a JSON object (no markdown):
                 m = [salvaged];
             }
         }
-
         if (m) {
-            try {
-                return JSON.parse(m[0]);
-            } catch (e3) {
-                // If it STILL fails to parse, create a fallback object directly from the text
-                return {
-                    confidence_score: 0,
-                    verdict: "INSUFFICIENT_EVIDENCE",
-                    ai_comments: "Analysis yielded partial response: " + text2.slice(0, 50).replace(/["\n\r]/g, '') + "... " + enforceEnding('', 0)
-                };
+            try { return JSON.parse(m[0]); } catch {
+                return { confidence_score: 0, verdict: "INSUFFICIENT_EVIDENCE", ai_comments: "Analysis yielded partial response. " + fixEnding('', 0) };
             }
         }
-
         throw new Error("No JSON object found: " + text2.slice(0, 100) + "...");
     }
 }
 
 // ─────────────────────────────────────────────
-// SIGHTENGINE
+// SIGHTENGINE (optional deepfake detection)
 // ─────────────────────────────────────────────
 async function deepfakeScore(imageUrl) {
+    const seUser   = getSEUser();
+    const seSecret = getSESecret();
+    if (!seUser || !seSecret) return 0;
     try {
-        const f = new URLSearchParams({ api_user: SE_USER, api_secret: SE_SECRET, url: imageUrl, models: 'genai' });
+        const f = new URLSearchParams({ api_user: seUser, api_secret: seSecret, url: imageUrl, models: 'genai' });
         const r = await fetch('https://api.sightengine.com/1.0/check.json', { method: 'POST', body: f });
         const d = await r.json();
         const s = d?.type?.ai_generated ?? d?.ai_generated?.score;
@@ -214,18 +199,24 @@ function fixEnding(text, score) {
 }
 
 // ─────────────────────────────────────────────
-// Supabase persist
+// localStorage persist
 // ─────────────────────────────────────────────
-async function save(reportId, payload) {
-    const { data: rows, error: ue } = await supabase
-        .from('ai_analysis').update(payload).eq('report_id', reportId).select('report_id');
-    if (ue) throw new Error('UPDATE: ' + ue.message);
-    if (!rows?.length) {
-        const { error: ie } = await supabase
-            .from('ai_analysis').insert({ report_id: reportId, ...payload });
-        if (ie) throw new Error('INSERT: ' + ie.message);
+function save(reportId, payload) {
+    const analyses = getAll('ai_analysis');
+    const i = analyses.findIndex(a => a.report_id === reportId);
+    if (i !== -1) {
+        analyses[i] = { ...analyses[i], ...payload };
+    } else {
+        analyses.push({ report_id: reportId, ...payload });
     }
-    await supabase.from('reports').update({ status: 'AI Processed' }).eq('report_id', reportId);
+    setAll('ai_analysis', analyses);
+
+    const reports = getAll('reports');
+    const ri = reports.findIndex(r => r.report_id === reportId);
+    if (ri !== -1) {
+        reports[ri] = { ...reports[ri], status: 'AI Processed' };
+        setAll('reports', reports);
+    }
 }
 
 // ─────────────────────────────────────────────
@@ -239,10 +230,8 @@ export async function processReportWithAI(reportId, imageUrl, crimeType, comment
     let plate = 'REVIEW REQUIRED';
     let summary = '[INSUFFICIENT_EVIDENCE] Analysis could not complete. Manual review required.';
 
-    // Load image once
     const imgData = await loadImage(imageUrl);
 
-    // Run all 3 in parallel
     const [plateRes, analysisRes, seRes] = await Promise.allSettled([
         detectPlate(imgData),
         analyseViolation(imgData, crimeType, comments),
@@ -256,11 +245,10 @@ export async function processReportWithAI(reportId, imageUrl, crimeType, comment
         const g = analysisRes.value;
         confidence = typeof g.confidence_score === 'number'
             ? Math.min(100, Math.max(0, Math.round(g.confidence_score))) : 0;
-        const verdict = g.verdict || 'INSUFFICIENT_EVIDENCE';
-        const comment = fixEnding(g.ai_comments || '', confidence);
+        const verdict  = g.verdict || 'INSUFFICIENT_EVIDENCE';
+        const comment  = fixEnding(g.ai_comments || '', confidence);
         summary = `[${verdict}] ${comment}`;
     } else {
-        // Save the actual error so admin can SEE it
         const errMsg = analysisRes.status === 'rejected'
             ? analysisRes.reason?.message
             : 'Gemini returned no parseable JSON';
@@ -269,18 +257,13 @@ export async function processReportWithAI(reportId, imageUrl, crimeType, comment
     }
 
     console.log(`[AI] plate=${plate} conf=${confidence}% deepfake=${deepfake}%`);
-    try {
-        await save(reportId, {
-            ai_summary: summary,
-            confidence_score: confidence,
-            detected_vehicle_number: plate,
-            ai_generated_score: deepfake,
-        });
-        console.log('[AI] ✅ Saved\n');
-    } catch (e) {
-        console.error('[AI] Save failed:', e.message);
-        throw e;
-    }
+    save(reportId, {
+        ai_summary: summary,
+        confidence_score: confidence,
+        detected_vehicle_number: plate,
+        ai_generated_score: deepfake,
+    });
+    console.log('[AI] Saved\n');
 }
 
 export async function rerunAIAnalysis(report) {

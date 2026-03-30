@@ -1,9 +1,10 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-// https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   plugins: [react()],
+  // In dev (npm run dev) base is '/', in production build base is the GitHub Pages path
+  base: command === 'build' ? '/delhi-roadwatch/' : '/',
   server: {
     proxy: {
       '/api/sightengine': {
@@ -18,4 +19,4 @@ export default defineConfig({
       }
     }
   }
-})
+}))

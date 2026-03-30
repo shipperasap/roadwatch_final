@@ -1,10 +1,8 @@
 /* ──────────────────────────────────────────────
    Delhi RoadWatch — Legal & Traffic FAQ AI Bot
-   Powered by Sarvam AI (Bulbul v3 + Sarvam-M)
    ────────────────────────────────────────────── */
 
 import { useState, useRef, useEffect } from 'react';
-import { textToSpeech, playBase64Audio } from '../../services/sarvamService';
 import { chatWithLegalBotGemini } from '../../services/aiEngine';
 import { useAuth } from '../../context/AuthContext';
 
@@ -25,7 +23,6 @@ export default function LegalFAQBot() {
 
     const [input, setInput] = useState('');
     const [isTyping, setIsTyping] = useState(false);
-    const [isSpeaking, setIsSpeaking] = useState(null);
     const chatEndRef = useRef(null);
 
     const scrollToBottom = () => {
@@ -68,20 +65,6 @@ export default function LegalFAQBot() {
         }
     };
 
-    const handleSpeak = async (text, index) => {
-        if (isSpeaking === index) return;
-        setIsSpeaking(index);
-        try {
-            const { audioBase64 } = await textToSpeech(text, 'en-IN');
-            const audio = playBase64Audio(audioBase64);
-            audio.onended = () => setIsSpeaking(null);
-            audio.onerror = () => setIsSpeaking(null);
-        } catch (err) {
-            console.error("TTS Error:", err);
-            setIsSpeaking(null);
-        }
-    };
-
     return (
         <div style={{ maxWidth: '800px', margin: '0 auto', height: 'calc(100vh - 120px)', display: 'flex', flexDirection: 'column' }} className="animate-up">
             {/* Header */}
@@ -113,20 +96,6 @@ export default function LegalFAQBot() {
                             <div style={{ fontSize: '14px', lineHeight: '1.6', whiteSpace: 'pre-wrap' }}>
                                 {msg.content}
                             </div>
-                            {msg.role === 'assistant' && (
-                                <button
-                                    onClick={() => handleSpeak(msg.content, idx)}
-                                    style={{
-                                        position: 'absolute', right: '-40px', bottom: '0',
-                                        background: 'white', border: '1px solid var(--border-color)',
-                                        borderRadius: '50%', width: '32px', height: '32px',
-                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                        cursor: 'pointer', boxShadow: 'var(--shadow-sm)'
-                                    }}
-                                >
-                                    {isSpeaking === idx ? '⏳' : '🔊'}
-                                </button>
-                            )}
                         </div>
                     </div>
                 ))}

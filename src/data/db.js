@@ -1,11 +1,11 @@
 /* ──────────────────────────────────────────────
-   Delhi RoadWatch — Database Layer (Supabase)
-   Replaces old in-memory db.js
+   Delhi RoadWatch — Database Layer (localStorage)
    ────────────────────────────────────────────── */
 
-import { supabase, vahaanDb } from '../lib/supabase';
+import { getAll, dbInsert, dbUpdate, dbRemove, dbFind, dbFilter } from '../lib/store';
 
-// ── Constants ──
+// ── Constants ──────────────────────────────────────────────────────────────
+
 export const CRIME_TYPES = [
   'Signal Jumping',
   'Illegal Parking',
@@ -19,211 +19,173 @@ export const CRIME_TYPES = [
 ];
 
 export const STATUS = {
-  SUBMITTED: 'Submitted',
-  AI_PROCESSED: 'AI Processed',
-  ADMIN_ACCEPTED: 'Admin Accepted',
-  ADMIN_REJECTED: 'Admin Rejected',
-  POLICE_CONFIRMED: 'Police Confirmed',
-  OWNER_NOTIFIED: 'Owner Notified',
+  SUBMITTED:       'Submitted',
+  AI_PROCESSED:    'AI Processed',
+  ADMIN_ACCEPTED:  'Admin Accepted',
+  ADMIN_REJECTED:  'Admin Rejected',
+  POLICE_CONFIRMED:'Police Confirmed',
+  OWNER_NOTIFIED:  'Owner Notified',
 };
 
-// ── Report ID generator ──
 let _counter = Date.now();
 export function nextReportId() {
   return `RPT-${++_counter}`;
 }
 
-// ═══════════════════════════════════════
-//  AUTH QUERIES
-// ═══════════════════════════════════════
+// ── AUTH ───────────────────────────────────────────────────────────────────
 
 export async function loginCitizen(email, password) {
-  const { data, error } = await supabase
-    .from('users')
-    .select('*')
-    .eq('email', email)
-    .eq('password_hash', password)
-    .single();
-  if (error || !data) return { success: false, error: 'Invalid email or password.' };
-  return { success: true, user: { ...data, role: 'citizen', user_id: data.user_id } };
+  const user = dbFind('users', u => u.email === email && u.password_hash === password);
+  if (!user) return { success: false, error: 'Invalid email or password.' };
+  return { success: true, user: { ...user, role: 'citizen', user_id: user.user_id } };
 }
 
 export async function loginPolice(policeId, password) {
-  const { data, error } = await supabase
-    .from('police')
-    .select('*')
-    .eq('police_id', policeId)
-    .eq('password_hash', password)
-    .single();
-  if (error || !data) return { success: false, error: 'Invalid Police ID or password.' };
-  return { success: true, user: { ...data, role: 'police', user_id: data.police_id } };
+  const user = dbFind('police', u => u.police_id === policeId && u.password_hash === password);
+  if (!user) return { success: false, error: 'Invalid Police ID or password.' };
+  return { success: true, user: { ...user, role: 'police', user_id: user.police_id } };
 }
 
 export async function loginAdmin(adminId, password) {
-  const { data, error } = await supabase
-    .from('admins')
-    .select('*')
-    .eq('admin_id', adminId)
-    .eq('password_hash', password)
-    .single();
-  if (error || !data) return { success: false, error: 'Invalid Admin ID or password.' };
-  return { success: true, user: { ...data, role: 'admin', user_id: data.admin_id } };
+  const user = dbFind('admins', u => u.admin_id === adminId && u.password_hash === password);
+  if (!user) return { success: false, error: 'Invalid Admin ID or password.' };
+  return { success: true, user: { ...user, role: 'admin', user_id: user.admin_id } };
 }
 
 export async function signupCitizen(name, email, phone, aadhaar, password) {
-  // Check if email exists
-  const { data: existing } = await supabase.from('users').select('user_id').eq('email', email).single();
-  if (existing) return { success: false, error: 'Email already registered.' };
-
-  const { data, error } = await supabase.from('users').insert({
-    role: 'citizen',
+  if (dbFind('users', u => u.email === email)) {
+    return { success: false, error: 'Email already registered.' };
+  }
+  const user = dbInsert('users', {
+    user_id: `u${Date.now()}`,
     name, email, phone,
-    aadhaar: aadhaar,
+    aadhaar,
     aadhaar_verified: true,
     password_hash: password,
-  }).select().single();
-
-  if (error) return { success: false, error: error.message };
-  return { success: true, user: { ...data, role: 'citizen', user_id: data.user_id } };
+    role: 'citizen',
+  });
+  return { success: true, user: { ...user, role: 'citizen' } };
 }
 
-// ═══════════════════════════════════════
-//  REPORT QUERIES
-// ═══════════════════════════════════════
+// ── REPORTS ────────────────────────────────────────────────────────────────
 
 export async function createReport(report) {
-  const { data, error } = await supabase.from('reports').insert(report).select().single();
-  if (error) throw error;
-
-  // Also create case_status row
-  await supabase.from('case_status').insert({
+  dbInsert('reports', report);
+  dbInsert('case_status', {
     report_id: report.report_id,
     admin_status: report.reported_by === 'police' ? 'accepted' : null,
     police_status: report.reported_by === 'police' ? 'confirmed' : null,
     notification_sent: false,
   });
-
-  return data;
+  return report;
 }
 
 export async function fetchReports(filters = {}) {
-  let query = supabase.from('reports').select('*').order('submission_time', { ascending: false });
-  if (filters.citizen_id) query = query.eq('citizen_id', filters.citizen_id);
-  if (filters.status) query = query.eq('status', filters.status);
-  if (filters.reported_by) query = query.eq('reported_by', filters.reported_by);
-  const { data, error } = await query;
-  if (error) throw error;
-  return data || [];
+  let rows = getAll('reports');
+  if (filters.citizen_id)  rows = rows.filter(r => r.citizen_id  === filters.citizen_id);
+  if (filters.status)      rows = rows.filter(r => r.status      === filters.status);
+  if (filters.reported_by) rows = rows.filter(r => r.reported_by === filters.reported_by);
+  return rows.sort((a, b) => new Date(b.submission_time) - new Date(a.submission_time));
 }
 
 export async function updateReportStatus(reportId, newStatus) {
-  const { error } = await supabase.from('reports').update({ status: newStatus }).eq('report_id', reportId);
-  if (error) throw error;
+  dbUpdate('reports', r => r.report_id === reportId, { status: newStatus });
 }
 
 export async function deleteReport(reportId) {
-  // Delete dependent rows first (FK constraints)
-  await supabase.from('ai_analysis').delete().eq('report_id', reportId);
-  await supabase.from('case_status').delete().eq('report_id', reportId);
-  await supabase.from('notifications').delete().eq('report_id', reportId);
-  const { error } = await supabase.from('reports').delete().eq('report_id', reportId);
-  if (error) throw error;
+  dbRemove('ai_analysis',  r => r.report_id === reportId);
+  dbRemove('case_status',  r => r.report_id === reportId);
+  dbRemove('notifications',r => r.report_id === reportId);
+  dbRemove('reports',      r => r.report_id === reportId);
 }
 
-export async function uploadEvidence(file, filename) {
-  const { data, error } = await supabase.storage
-    .from('evidence')
-    .upload(filename, file, { cacheControl: '3600', upsert: false });
-  if (error) throw error;
-
-  const { data: publicUrlData } = supabase.storage
-    .from('evidence')
-    .getPublicUrl(filename);
-
-  return publicUrlData.publicUrl;
+// Compress image to base64; videos get an object URL (in-session only)
+export async function uploadEvidence(file) {
+  if (file.type.startsWith('image/')) return compressToBase64(file);
+  return URL.createObjectURL(file);
 }
 
-// ═══════════════════════════════════════
-//  AI ANALYSIS QUERIES
-// ═══════════════════════════════════════
+async function compressToBase64(file, maxWidth = 900, quality = 0.75) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = img.width > maxWidth ? maxWidth / img.width : 1;
+      const canvas = document.createElement('canvas');
+      canvas.width  = Math.round(img.width  * scale);
+      canvas.height = Math.round(img.height * scale);
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL('image/jpeg', quality));
+    };
+    img.onerror = () => resolve(URL.createObjectURL(file));
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+// ── AI ANALYSIS ────────────────────────────────────────────────────────────
 
 export async function saveAiAnalysis(analysis) {
-  const { data, error } = await supabase.from('ai_analysis').insert(analysis).select().single();
-  if (error) throw error;
-  return data;
+  return dbInsert('ai_analysis', analysis);
 }
 
 export async function fetchAiAnalysis(reportId) {
-  const { data } = await supabase.from('ai_analysis').select('*').eq('report_id', reportId).single();
-  return data;
+  return dbFind('ai_analysis', a => a.report_id === reportId);
 }
 
 export async function fetchAllAiAnalysis() {
-  const { data } = await supabase.from('ai_analysis').select('*');
-  return data || [];
+  return getAll('ai_analysis');
 }
 
-// ═══════════════════════════════════════
-//  VAHAAN DB QUERIES (separate project)
-// ═══════════════════════════════════════
+// ── VAHAAN VEHICLE REGISTRY ────────────────────────────────────────────────
 
 export async function lookupVehicle(numberPlate) {
-  const { data, error } = await vahaanDb
-    .from('vehicles')
-    .select('*')
-    .eq('number_plate', numberPlate)
-    .single();
-  if (error || !data) return null;
-  return data;
+  const plate = (numberPlate || '').toUpperCase().replace(/\s/g, '');
+  return dbFind('vehicles', v => v.number_plate.replace(/\s/g, '') === plate);
 }
 
 export async function fetchAllVehicles() {
-  const { data } = await vahaanDb.from('vehicles').select('*');
-  return data || [];
+  return getAll('vehicles');
 }
 
-// ═══════════════════════════════════════
-//  CASE STATUS QUERIES
-// ═══════════════════════════════════════
+// ── CASE STATUS ────────────────────────────────────────────────────────────
 
 export async function updateCaseStatus(reportId, updates) {
-  const { error } = await supabase.from('case_status').update({ ...updates, updated_at: new Date().toISOString() }).eq('report_id', reportId);
-  if (error) throw error;
+  dbUpdate('case_status', r => r.report_id === reportId, {
+    ...updates,
+    updated_at: new Date().toISOString(),
+  });
 }
 
-// ═══════════════════════════════════════
-//  NOTIFICATION QUERIES
-// ═══════════════════════════════════════
+// ── NOTIFICATIONS ──────────────────────────────────────────────────────────
 
 export async function createNotification(notification) {
-  const { data, error } = await supabase.from('notifications').insert(notification).select().single();
-  if (error) throw error;
-  return data;
+  return dbInsert('notifications', {
+    ...notification,
+    id: `notif_${Date.now()}`,
+    sent_at: new Date().toISOString(),
+  });
 }
 
 export async function fetchNotifications() {
-  const { data } = await supabase.from('notifications').select('*').order('sent_at', { ascending: false });
-  return data || [];
+  return getAll('notifications').sort((a, b) => new Date(b.sent_at) - new Date(a.sent_at));
 }
 
-// ═══════════════════════════════════════
-//  VIOLATIONS QUERIES (shown to violators)
-// ═══════════════════════════════════════
+// ── VIOLATIONS (shown to violators on login) ───────────────────────────────
 
 export async function createViolation(violation) {
-  const { data, error } = await supabase.from('violations').insert(violation).select().single();
-  if (error) throw error;
-  return data;
+  return dbInsert('violations', {
+    ...violation,
+    id: `v_${Date.now()}`,
+    created_at: new Date().toISOString(),
+  });
 }
 
 export async function fetchViolationsForUser(phone) {
-  const { data } = await supabase.from('violations').select('*').eq('violator_phone', phone).order('created_at', { ascending: false });
-  return data || [];
+  return dbFilter('violations', v => v.violator_phone === phone)
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 }
 
 export async function fetchViolationsByEmail(email) {
-  // Look up user phone by email first, then get violations
-  const { data: user } = await supabase.from('users').select('phone').eq('email', email).single();
+  const user = dbFind('users', u => u.email === email);
   if (!user) return [];
   return fetchViolationsForUser(user.phone);
 }

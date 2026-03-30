@@ -1,9 +1,5 @@
-/* ──────────────────────────────────────────────
-   Delhi RoadWatch — Citizen Home (2026 SaaS Redesign)
-   ────────────────────────────────────────────── */
-
 import { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { fetchReports, fetchViolationsByEmail } from '../../data/db';
 
@@ -16,7 +12,6 @@ export default function CitizenHome() {
 
     useEffect(() => {
         async function load() {
-            setLoading(true);
             const reports = await fetchReports({ citizen_id: currentUser?.user_id });
             setMyReports(reports);
             if (currentUser?.email) {
@@ -28,90 +23,63 @@ export default function CitizenHome() {
         load();
     }, [currentUser]);
 
-    if (loading) return <div style={{ padding: '80px', textAlign: 'center', color: 'var(--text-muted)' }}>Initializing...</div>;
+    if (loading) return <div style={{ padding: '60px', textAlign: 'center', color: 'var(--text-3)', fontSize: '13px' }}>Loading…</div>;
 
-    const resolvedCount = myReports.filter(r => ['Admin Accepted', 'Police Confirmed', 'Owner Notified'].includes(r.status)).length;
-    const pendingCount = myReports.filter(r => ['Submitted', 'AI Processed'].includes(r.status)).length;
+    const resolved = myReports.filter(r => ['Admin Accepted', 'Police Confirmed', 'Owner Notified'].includes(r.status)).length;
+    const pending  = myReports.filter(r => ['Submitted', 'AI Processed'].includes(r.status)).length;
+    const firstName = currentUser?.name?.split(' ')[0] || 'there';
+    const isPolice  = currentUser?.role === 'police';
 
     return (
-        <div className="mobile-view-container" style={{ maxWidth: '480px', margin: '0 auto' }}>
-            <header style={{
-                display: 'flex',
-                justifyContent: 'center',
-                alignItems: 'center',
-                marginBottom: 'var(--space-24)',
-                paddingTop: 'var(--space-8)'
-            }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', textAlign: 'left' }}>
-                    <div className="icon-container" style={{ width: '32px', height: '32px', background: 'var(--info-light)', color: 'var(--info)', fontSize: '14px' }}>📍</div>
-                    <div>
-                        <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', lineHeight: 1 }}>Location</div>
-                        <div style={{ fontSize: '14px', fontWeight: 600 }}>New Delhi, DL</div>
-                    </div>
-                </div>
-            </header>
+        <div className="animate-up" style={{ maxWidth: '420px', margin: '0 auto' }}>
 
-            {/* 2. Greeting Area */}
-            <section style={{ marginBottom: 'var(--space-24)', textAlign: 'center' }} className="animate-up">
-                <h1 className="text-hero" style={{ marginBottom: '4px' }}>{currentUser?.role === 'police' ? 'Jai Hind, Officer' : `Jai Hind, ${currentUser?.name?.split(' ')[0]}`}</h1>
-                <p className="text-meta" style={{ fontSize: '15px' }}>Road safety starts with you. Keep Delhi moving.</p>
-            </section>
+            {/* Greeting */}
+            <div style={{ marginBottom: '24px' }}>
+                <h1 style={{ marginBottom: '2px' }}>
+                    {isPolice ? 'Hello, Officer' : `Hello, ${firstName}`}
+                </h1>
+                <p style={{ color: 'var(--text-2)', fontSize: '13px' }}>New Delhi, DL</p>
+            </div>
 
-            {/* 3. Main "Report Violation" Card (Emotion Center) */}
-            <section style={{ marginBottom: 'var(--space-24)' }} className="animate-up delay-1">
-                <div className="card" style={{
-                    background: 'linear-gradient(135deg, var(--bg-card) 0%, #FAFBFF 100%)',
-                    padding: 'var(--space-24)',
-                    position: 'relative',
-                    overflow: 'hidden'
-                }}>
-                    {/* Subtle Background Glow */}
-                    <div style={{ position: 'absolute', top: '-40px', right: '-40px', width: '120px', height: '120px', background: 'var(--primary)', opacity: 0.05, filter: 'blur(40px)', borderRadius: '50%' }}></div>
-
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
-                        <div className="icon-container" style={{ width: '64px', height: '64px', background: 'var(--primary-light)', color: 'var(--primary)', fontSize: '28px', marginBottom: 'var(--space-16)' }}>
-                            📸
-                        </div>
-                        <h2 style={{ marginBottom: '8px' }}>Report Violation</h2>
-                        <p className="text-meta" style={{ marginBottom: 'var(--space-24)', maxWidth: '280px' }}>Upload clear photos or videos of traffic rule breakers for AI verification.</p>
-
-                        <button className="btn btn-primary" style={{ width: '100%', padding: '16px' }} onClick={() => navigate(currentUser?.role === 'police' ? '/police/report' : '/citizen/report')}>
-                            Open Camera & Report
-                        </button>
-                    </div>
-                </div>
-            </section>
-
-            {/* 4. Status Stats (Resolved / Pending) */}
-            <section style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-16)', marginBottom: 'var(--space-24)' }} className="animate-up delay-2">
-                <div className="card" style={{ padding: 'var(--space-16)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
-                    <div className="icon-container" style={{ width: '40px', height: '40px', background: 'var(--success-light)', color: 'var(--success)', fontSize: '18px' }}>✓</div>
-                    <div style={{ textAlign: 'center' }}>
-                        <div style={{ fontSize: '20px', fontWeight: 800, lineHeight: 1 }}>{resolvedCount}</div>
-                        <div className="text-meta" style={{ fontSize: '12px', fontWeight: 600 }}>RESOLVED</div>
-                    </div>
-                </div>
-                <div className="card" style={{ padding: 'var(--space-16)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
-                    <div className="icon-container" style={{ width: '40px', height: '40px', background: 'var(--warning-light)', color: 'var(--warning)', fontSize: '18px' }}>🕒</div>
-                    <div style={{ textAlign: 'center' }}>
-                        <div style={{ fontSize: '20px', fontWeight: 800, lineHeight: 1 }}>{pendingCount}</div>
-                        <div className="text-meta" style={{ fontSize: '12px', fontWeight: 600 }}>PENDING</div>
-                    </div>
-                </div>
-            </section>
-
-            {/* Active Violations Alert (If any) */}
+            {/* Violation alert */}
             {violations.length > 0 && (
-                <div className="card" style={{ marginBottom: 'var(--space-24)', background: 'var(--danger-light)', border: '1px solid rgba(239, 68, 68, 0.2)', padding: 'var(--space-16)' }}>
-                    <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-                        <span style={{ fontSize: '20px' }}>⚠️</span>
-                        <div>
-                            <div style={{ fontWeight: 700, color: 'var(--danger)', fontSize: '14px' }}>Active Penalty Detected</div>
-                            <div className="text-meta" style={{ color: 'var(--danger)', opacity: 0.8, fontSize: '13px' }}>You have {violations.length} pending road violations.</div>
+                <div style={{ background: 'var(--danger-bg)', border: '1px solid #FECACA', borderRadius: 'var(--radius)', padding: '12px 14px', marginBottom: '16px', display: 'flex', gap: '10px', alignItems: 'center' }}>
+                    <span style={{ fontSize: '16px' }}>⚠️</span>
+                    <div>
+                        <div style={{ fontSize: '13px', fontWeight: '600', color: 'var(--danger)' }}>
+                            {violations.length} pending {violations.length === 1 ? 'violation' : 'violations'}
                         </div>
+                        <div style={{ fontSize: '12px', color: 'var(--danger)', opacity: 0.8 }}>You have unresolved road violations on record.</div>
                     </div>
                 </div>
             )}
+
+            {/* Report CTA */}
+            <div className="card" style={{ marginBottom: '16px', padding: '24px', textAlign: 'center' }}>
+                <div style={{ width: '44px', height: '44px', background: 'var(--primary-dim)', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '22px', margin: '0 auto 14px' }}>
+                    📸
+                </div>
+                <h2 style={{ marginBottom: '6px', fontSize: '16px' }}>Report a violation</h2>
+                <p style={{ fontSize: '13px', color: 'var(--text-2)', marginBottom: '18px', lineHeight: '1.5' }}>
+                    Upload a photo or video. AI will verify the evidence automatically.
+                </p>
+                <button className="btn btn-primary" style={{ width: '100%', padding: '10px' }}
+                    onClick={() => navigate(isPolice ? '/police/report' : '/citizen/report')}>
+                    Open camera
+                </button>
+            </div>
+
+            {/* Stats */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div className="card" style={{ padding: '16px', textAlign: 'center' }}>
+                    <div style={{ fontSize: '26px', fontWeight: '600', color: 'var(--success)', marginBottom: '2px' }}>{resolved}</div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-3)' }}>Resolved</div>
+                </div>
+                <div className="card" style={{ padding: '16px', textAlign: 'center' }}>
+                    <div style={{ fontSize: '26px', fontWeight: '600', color: 'var(--warning)', marginBottom: '2px' }}>{pending}</div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-3)' }}>Pending</div>
+                </div>
+            </div>
 
         </div>
     );
